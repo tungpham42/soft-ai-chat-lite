@@ -424,7 +424,7 @@ function soft_ai_lite_inject_widget() {
         .sac-header { background: <?php echo esc_attr($color); ?>; color: white; padding: 15px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
         .sac-close { cursor: pointer; font-size: 18px; opacity: 0.8; }
         .sac-close:hover { opacity: 1; }
-        #sac-messages { flex: 1; padding: 15px; overflow-y: auto; background: #f8f9fa; display: flex; flex-direction: column; gap: 12px; font-size: 14px; scroll-behavior: smooth; }
+        #sac-messages { flex: 1; padding: 15px; overflow-y: auto; background: #f8f9fa; display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
         .sac-msg { padding: 10px 14px; border-radius: 12px; line-height: 1.5; max-width: 85%; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
         .sac-msg.user { align-self: flex-end; background: #222; color: white; border-bottom-right-radius: 2px; }
         .sac-msg.bot { align-self: flex-start; background: #fff; border: 1px solid #e5e5e5; color: #333; border-bottom-left-radius: 2px; }
