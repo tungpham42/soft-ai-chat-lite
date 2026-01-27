@@ -96,6 +96,7 @@ function soft_ai_lite_settings_init() {
     
     // Section 2: UI
     add_settings_section('soft_ai_chat_ui', __('User Interface', 'soft-ai-chat-lite'), null, 'softAiChatLite');
+    add_settings_field('chat_title', __('Chatbox Title', 'soft-ai-chat-lite'), 'soft_ai_lite_render_text', 'softAiChatLite', 'soft_ai_chat_ui', ['field' => 'chat_title', 'default' => 'Trợ lý AI', 'width' => '100%']);
     add_settings_field('welcome_msg', __('Welcome Message', 'soft-ai-chat-lite'), 'soft_ai_lite_render_text', 'softAiChatLite', 'soft_ai_chat_ui', ['field' => 'welcome_msg', 'default' => 'Xin chào! Bạn cần hỗ trợ thông tin gì ạ?', 'width' => '100%']);
     add_settings_field('theme_color', __('Widget Color', 'soft-ai-chat-lite'), 'soft_ai_lite_themecolor_render', 'softAiChatLite', 'soft_ai_chat_ui');
 }
@@ -408,6 +409,7 @@ function soft_ai_lite_inject_widget() {
 
     $color = $options['theme_color'] ?? '#027DDD';
     $welcome = $options['welcome_msg'] ?? 'Xin chào! Bạn cần hỗ trợ thông tin gì ạ?';
+    $chat_title = $options['chat_title'] ?? 'Trợ lý AI';
     ?>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
     <style>
@@ -450,7 +452,7 @@ function soft_ai_lite_inject_widget() {
     <div id="sac-trigger" onclick="toggleSac()">💬</div>
     <div id="sac-window">
         <div class="sac-header">
-            <span>Trợ lý AI</span>
+            <span><?php echo esc_html($chat_title); ?></span>
             <span class="sac-close" onclick="toggleSac()">✕</span>
         </div>
         <div id="sac-messages">
