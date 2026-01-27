@@ -84,7 +84,12 @@ function soft_ai_lite_settings_init() {
     add_settings_field('groq_api_key', __('Groq API Key', 'soft-ai-chat-lite'), 'soft_ai_lite_render_password', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'groq_api_key', 'class' => 'row-groq']);
     add_settings_field('openai_api_key', __('OpenAI API Key', 'soft-ai-chat-lite'), 'soft_ai_lite_render_password', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'openai_api_key', 'class' => 'row-openai']);
     add_settings_field('gemini_api_key', __('Google Gemini API Key', 'soft-ai-chat-lite'), 'soft_ai_lite_render_password', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'gemini_api_key', 'class' => 'row-gemini']);
-    add_settings_field('model', __('AI Model Name', 'soft-ai-chat-lite'), 'soft_ai_lite_render_text', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'model', 'default' => 'llama-3.3-70b-versatile']);
+    add_settings_field('model', __('AI Model Name', 'soft-ai-chat-lite'), 'soft_ai_lite_render_text', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'model', 'default' => 'llama-3.3-70b-versatile', 'desc' => '
+        <strong>Recommended Model IDs (Copy & Paste):</strong><br>
+        🟢 <b>Groq:</b> <code>llama-3.3-70b-versatile</code> (Best), <code>openai/gpt-oss-120b</code><br>
+        🔵 <b>OpenAI:</b> <code>gpt-4o-mini</code> (Fast), <code>gpt-4o</code> (Smart)<br>
+        🟣 <b>Gemini:</b> <code>gemini-1.5-flash</code> (Fast), <code>gemini-1.5-pro</code>
+    ']);
     add_settings_field('temperature', __('Creativity', 'soft-ai-chat-lite'), 'soft_ai_lite_render_number', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'temperature', 'default' => 0.5, 'step' => 0.1, 'max' => 1]);
     add_settings_field('max_tokens', __('Max Tokens', 'soft-ai-chat-lite'), 'soft_ai_lite_render_number', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'max_tokens', 'default' => 4096]);
     add_settings_field('system_prompt', __('Custom Persona', 'soft-ai-chat-lite'), 'soft_ai_lite_render_textarea', 'softAiChatLite', 'soft_ai_chat_main', ['field' => 'system_prompt', 'desc' => 'System instructions for the AI.']);
