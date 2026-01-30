@@ -1215,7 +1215,8 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
                      "1. Answer the user's question based on the Website Content provided.\n" .
                      "2. If the user asks about products, provide information (price, details) and the Link.\n" .
                      "3. Do NOT try to sell, add to cart, or process orders. Just provide information.\n" .
-                     "4. Answer in Vietnamese. Keep it concise and friendly.";
+                     "4. Answer in Vietnamese. Keep it concise and friendly." .
+                     "5. If you use tables, use standard Markdown table format. Keep tables simple with 2-3 columns maximum for mobile view.";
 
     // 6. Call API
     $ai_response = soft_ai_chat_call_api($provider, $model, $system_prompt, $question, $options);
@@ -1900,6 +1901,21 @@ function soft_ai_chat_inject_widget() {
     ?>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
     <style>
+        .sac-msg.bot table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+            font-size: 13px;
+        }
+        .sac-msg.bot th, .sac-msg.bot td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .sac-msg.bot th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
         #sac-trigger {
             position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px;
             background: <?php echo esc_attr($color); ?>; color: white; border-radius: 50%;
