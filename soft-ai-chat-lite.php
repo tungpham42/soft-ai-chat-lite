@@ -321,6 +321,7 @@ function soft_ai_canned_responses_page() {
 
 function soft_ai_live_chat_page() {
     if (!current_user_can('manage_options')) return;
+    echo '<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>';
     ?>
     <style>
         /* Toggle Switch CSS */
@@ -470,12 +471,14 @@ function soft_ai_live_chat_page() {
                 response.data.messages.forEach(function(msg) {
                     var align = msg.is_admin ? 'text-align:right;' : 'text-align:left;';
                     var bg = msg.is_admin ? 'background:#0073aa; color:white;' : 'background:#e5e5e5; color:#333;';
+
+                    var parsedContent = marked.parse(msg.content);
+                
                     html += '<div style="margin-bottom: 10px; ' + align + '">';
-                    html += '<div style="display:inline-block; padding: 8px 12px; border-radius: 15px; max-width: 70%; ' + bg + '">' + msg.content + '</div>';
+                    html += '<div class="sac-msg-bubble" style="display:inline-block; padding: 8px 12px; border-radius: 15px; max-width: 85%; ' + bg + '">' + parsedContent + '</div>';
                     html += '<div style="font-size:10px; color:#999; margin-top:2px;">' + msg.time + '</div>';
                     html += '</div>';
                     
-                    // Capture last user message for auto-suggest
                     if(!msg.is_admin) lastUserMsg = msg.content; 
                 });
                 var container = document.getElementById('sac-admin-messages');
