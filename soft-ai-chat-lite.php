@@ -95,6 +95,7 @@ function soft_ai_chat_settings_init() {
     // Section 1: AI Configuration
     add_settings_section('soft_ai_chat_main', __('General & AI Configuration', 'soft-ai-chat'), null, 'softAiChat');
     add_settings_field('save_history', __('Save Chat History', 'soft-ai-chat'), 'soft_ai_render_checkbox', 'softAiChat', 'soft_ai_chat_main', ['field' => 'save_history']);
+    add_settings_field('admin_email_notify', __('Admin Notification Email', 'soft-ai-chat'), 'soft_ai_render_text', 'softAiChat', 'soft_ai_chat_main', ['field' => 'admin_email_notify', 'desc' => 'Địa chỉ email nhận thông báo khi có tin nhắn mới từ khách.']);
     add_settings_field('provider', __('Select AI Provider', 'soft-ai-chat'), 'soft_ai_chat_provider_render', 'softAiChat', 'soft_ai_chat_main');
     add_settings_field('groq_api_key', __('Groq API Key', 'soft-ai-chat'), 'soft_ai_render_password', 'softAiChat', 'soft_ai_chat_main', ['field' => 'groq_api_key', 'class' => 'row-groq']);
     add_settings_field('openai_api_key', __('OpenAI API Key', 'soft-ai-chat'), 'soft_ai_render_password', 'softAiChat', 'soft_ai_chat_main', ['field' => 'openai_api_key', 'class' => 'row-openai']);
@@ -1052,6 +1053,25 @@ class Soft_AI_Context {
 // ---------------------------------------------------------
 // 3. CORE LOGIC
 // ---------------------------------------------------------
+function soft_ai_notify_admin_by_email($question, $platform, $user_id) {
+    $options = get_option('soft_ai_chat_settings');
+    $admin_email = $options['admin_email_notify'] ?? get_option('admin_email');
+
+    if (empty($admin_email)) return;
+
+    $subject = "[Soft AI Chat] Tin nhắn mới từ " . strtoupper($platform);
+    $body = "Bạn có tin nhắn mới từ khách hàng trên website.\n\n";
+    $body .= "------------------------------------------\n";
+    $body .= "Nền tảng: " . $platform . "\n";
+    $body .= "User ID/IP: " . $user_id . "\n";
+    $body .= "Nội dung: " . $question . "\n";
+    $body .= "------------------------------------------\n\n";
+    $body .= "Đi tới Live Chat để trả lời: " . admin_url('admin.php?page=soft-ai-live-chat');
+
+    $headers = array('Content-Type: text/plain; charset=UTF-8');
+
+    wp_mail($admin_email, $subject, $body, $headers);
+}
 
 function soft_ai_clean_content($content) {
     if (!is_string($content)) return '';
@@ -1760,6 +1780,8 @@ function soft_ai_chat_handle_widget_request($request) {
     
     if (!$question) return new WP_Error('no_input', 'Empty Question', ['status' => 400]);
 
+    soft_ai_notify_admin_by_email($question, 'Website Widget', $_SERVER['REMOTE_ADDR']);
+
     $answer = soft_ai_generate_answer($question, 'widget');
     
     // If answer is the special wait flag, return empty to frontend so it just waits
@@ -1807,10 +1829,14 @@ function soft_ai_chat_webhook_facebook($request) {
             foreach ($entry['messaging'] as $event) {
                 if (isset($event['message']['text']) && !isset($event['message']['is_echo'])) {
                     $sender = $event['sender']['id'];
-                    $reply = soft_ai_generate_answer($event['message']['text'], 'facebook', $sender);
+                    $user_msg = $event['message']['text'];
+
+                    soft_ai_notify_admin_by_email($user_msg, 'Facebook', $sender);
+
+                    $reply = soft_ai_generate_answer($user_msg, 'facebook', $sender);
                     if ($reply !== '[WAIT_FOR_HUMAN]') {
-                         soft_ai_send_fb_message($sender, $reply, $options['fb_page_token']);
-                         soft_ai_log_chat($event['message']['text'], $reply, 'facebook');
+                        soft_ai_send_fb_message($sender, $reply, $options['fb_page_token']);
+                        soft_ai_log_chat($event['message']['text'], $reply, 'facebook');
                     }
                 }
             }
@@ -1835,7 +1861,11 @@ function soft_ai_chat_webhook_zalo($request) {
     $body = $request->get_json_params();
     if (isset($body['event_name']) && $body['event_name'] === 'user_send_text') {
         $sender = $body['sender']['id'];
-        $reply = soft_ai_generate_answer($body['message']['text'], 'zalo', $sender);
+        $user_msg = $body['message']['text'];
+
+        soft_ai_notify_admin_by_email($user_msg, 'Zalo', $sender);
+
+        $reply = soft_ai_generate_answer($user_msg, 'zalo', $sender);
         
         if ($reply !== '[WAIT_FOR_HUMAN]') {
             $token = get_option('soft_ai_chat_settings')['zalo_access_token'] ?? '';
