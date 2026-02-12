@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Soft AI Chat (All-in-One) - Enhanced Payment & Social & Live Chat & Coupons & Canned Responses
  * Plugin URI:  https://soft.io.vn/soft-ai-chat
- * Description: AI Chat Widget & Sales Bot. Supports RAG + WooCommerce + Coupons + VietQR/PayPal + Facebook/Zalo + Live Chat + Canned Responses + Auto Suggestions.
- * Version:     3.5.3
+ * Description: AI Chat Widget & Sales Bot. Supports RAG + WooCommerce + Coupons + VietQR/PayPal + Facebook/Zalo + Live Chat + Canned Responses + Auto Suggestions + Customer Profiles.
+ * Version:     3.6.0
  * Author:      Tung Pham
  * License:     GPL-2.0+
  * Text Domain: soft-ai-chat
@@ -42,7 +42,7 @@ function soft_ai_chat_activate() {
     ) $charset_collate;";
     dbDelta($sql_logs);
 
-    // Table 2: Canned Messages (NEW)
+    // Table 2: Canned Messages
     $table_canned = $wpdb->prefix . 'soft_ai_canned_msgs';
     $sql_canned = "CREATE TABLE $table_canned (
         id mediumint(9) NOT NULL AUTO_INCREMENT,
@@ -52,6 +52,18 @@ function soft_ai_chat_activate() {
         PRIMARY KEY  (id)
     ) $charset_collate;";
     dbDelta($sql_canned);
+
+    // Table 3: User Profiles (NEW - Lưu thông tin khách hàng FB/Zalo)
+    $table_users = $wpdb->prefix . 'soft_ai_chat_users';
+    $sql_users = "CREATE TABLE $table_users (
+        user_id varchar(100) NOT NULL,
+        name varchar(255) DEFAULT '' NOT NULL,
+        avatar varchar(500) DEFAULT '' NOT NULL,
+        platform varchar(50) DEFAULT 'widget' NOT NULL,
+        updated_at datetime DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (user_id)
+    ) $charset_collate;";
+    dbDelta($sql_users);
 }
 
 // ---------------------------------------------------------
@@ -126,7 +138,7 @@ function soft_ai_chat_settings_init() {
     add_settings_field('enable_fb_widget', __('Show FB Chat Bubble', 'soft-ai-chat'), 'soft_ai_render_checkbox', 'softAiChat', 'soft_ai_chat_social', ['field' => 'enable_fb_widget']);
     add_settings_field('fb_page_id', __('Facebook Page ID', 'soft-ai-chat'), 'soft_ai_render_text', 'softAiChat', 'soft_ai_chat_social', ['field' => 'fb_page_id', 'desc' => 'Required for Chatbox Widget (Find in Page > About).']);
     add_settings_field('fb_app_access_token', __('Facebook App Access Token', 'soft-ai-chat'), 'soft_ai_render_token', 'softAiChat', 'soft_ai_chat_social', ['field' => 'fb_app_access_token', 'desc' => 'Required for extended API features (Optional).']);
-    add_settings_field('fb_page_token', __('Facebook Page Access Token', 'soft-ai-chat'), 'soft_ai_render_token', 'softAiChat', 'soft_ai_chat_social', ['field' => 'fb_page_token', 'desc' => 'Required for AI Auto-Reply.']);
+    add_settings_field('fb_page_token', __('Facebook Page Access Token', 'soft-ai-chat'), 'soft_ai_render_token', 'softAiChat', 'soft_ai_chat_social', ['field' => 'fb_page_token', 'desc' => 'Required for AI Auto-Reply & <b>Get User Profile</b>.']);
     add_settings_field('fb_verify_token', __('Facebook Verify Token', 'soft-ai-chat'), 'soft_ai_render_text', 'softAiChat', 'soft_ai_chat_social', ['field' => 'fb_verify_token', 'default' => 'soft_ai_verify']);
 
     // Zalo
@@ -135,7 +147,7 @@ function soft_ai_chat_settings_init() {
     add_settings_field('zalo_oa_id', __('Zalo OA ID', 'soft-ai-chat'), 'soft_ai_render_text', 'softAiChat', 'soft_ai_chat_social', ['field' => 'zalo_oa_id', 'desc' => 'Required for Chat Widget.']);
     add_settings_field('zalo_access_token', __('Zalo OA Access Token', 'soft-ai-chat'), 'soft_ai_render_token', 'softAiChat', 'soft_ai_chat_social', ['field' => 'zalo_access_token', 'desc' => 'Required for AI Auto-Reply.']);
 
-    // Section 5: Form Integrations (NEW)
+    // Section 5: Form Integrations
     add_settings_section('soft_ai_form_detect', __('Form Integrations', 'soft-ai-chat'), 'soft_ai_form_detect_desc', 'softAiChat');
     add_settings_field('detected_forms', __('Detected Form Plugins', 'soft-ai-chat'), 'soft_ai_render_detected_forms', 'softAiChat', 'soft_ai_form_detect');
 }
@@ -223,18 +235,11 @@ function soft_ai_chat_options_page() {
     <?php
 }
 
-/**
- * Description for the Form Detection section
- */
 function soft_ai_form_detect_desc() {
     echo '<p>The AI automatically detects active form plugins to optimize lead capture flows.</p>';
 }
 
-/**
- * Renders the list of detected form plugins in the settings panel
- */
 function soft_ai_render_detected_forms() {
-    // List of supported form plugins
     $form_plugins = [
         'contact-form-7/wp-contact-form-7.php' => 'Contact Form 7',
         'elementor/elementor.php'              => 'Elementor Forms',
@@ -274,7 +279,6 @@ function soft_ai_canned_responses_page() {
     global $wpdb;
     $table = $wpdb->prefix . 'soft_ai_canned_msgs';
 
-    // HANDLE ADD/UPDATE
     if (isset($_POST['sac_save_canned']) && check_admin_referer('sac_save_canned_nonce')) {
         $shortcut = sanitize_text_field($_POST['shortcut']);
         $content = sanitize_textarea_field($_POST['content']);
@@ -291,14 +295,12 @@ function soft_ai_canned_responses_page() {
         }
     }
 
-    // HANDLE DELETE
     if (isset($_GET['action']) && $_GET['action'] == 'delete' && isset($_GET['id'])) {
         $del_id = intval($_GET['id']);
         $wpdb->delete($table, ['id' => $del_id]);
         echo '<div class="updated"><p>Deleted.</p></div>';
     }
 
-    // PREPARE EDIT DATA
     $edit_data = null;
     if (isset($_GET['action']) && $_GET['action'] == 'edit' && isset($_GET['id'])) {
         $edit_data = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", intval($_GET['id'])));
@@ -363,7 +365,7 @@ function soft_ai_canned_responses_page() {
 }
 
 // ---------------------------------------------------------
-// 1.5. LIVE CHAT PAGE (UPDATED WITH CANNED RESPONSES UI)
+// 1.5. LIVE CHAT PAGE
 // ---------------------------------------------------------
 
 function soft_ai_live_chat_page() {
@@ -371,7 +373,6 @@ function soft_ai_live_chat_page() {
     echo '<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>';
     ?>
     <style>
-        /* Toggle Switch CSS */
         .sac-switch { position: relative; display: inline-block; width: 50px; height: 24px; vertical-align: middle; margin-left: 10px; }
         .sac-switch input { opacity: 0; width: 0; height: 0; }
         .sac-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; -webkit-transition: .4s; transition: .4s; border-radius: 24px; }
@@ -381,7 +382,6 @@ function soft_ai_live_chat_page() {
         input:checked + .sac-slider:before { -webkit-transform: translateX(26px); -ms-transform: translateX(26px); transform: translateX(26px); }
         .sac-mode-label { font-size: 13px; font-weight: normal; margin-left: 5px; color: #555; }
 
-        /* Canned Responses UI */
         #sac-canned-popup { 
             display: none; position: absolute; bottom: 60px; left: 15px; width: 400px; 
             background: white; border: 1px solid #ccc; box-shadow: 0 -5px 20px rgba(0,0,0,0.1); 
@@ -393,7 +393,6 @@ function soft_ai_live_chat_page() {
         .sac-canned-item:hover { background: #f0f7fd; color: #0073aa; }
         .sac-canned-shortcut { font-weight: bold; color: #555; display: inline-block; width: 80px; }
 
-        /* Auto Suggestion Chips */
         #sac-suggestions { 
             padding: 8px 15px; 
             background: #fffbe6; 
@@ -416,13 +415,19 @@ function soft_ai_live_chat_page() {
         }
         .sac-suggest-chip:hover { background: #ffc069; color: #fff; border-color: #fa8c16; }
         .sac-suggest-label { font-weight:bold; margin-right: 5px; }
+
+        .sac-session-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; }
+        .sac-session-avatar { width: 32px; height: 32px; border-radius: 50%; margin-right: 10px; object-fit: cover; background: #ddd; }
+        .sac-session-info { flex: 1; overflow: hidden; }
+        .sac-session-name { font-weight: bold; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sac-session-meta { font-size: 11px; color: #888; }
     </style>
 
     <div class="wrap" style="height: auto; display: flex; flex-direction: column;">
         <h1 style="margin-bottom: 20px;">🔴 Live Chat (Human Support)</h1>
         
         <div style="display: flex; flex: 1; gap: 20px; height: 100%; overflow: hidden;">
-            <div style="height: 100vh; width: 250px; background: #fff; border: 1px solid #ccd0d4; overflow-y: auto;" id="sac-admin-sessions">
+            <div style="height: 100vh; width: 280px; background: #fff; border: 1px solid #ccd0d4; overflow-y: auto;" id="sac-admin-sessions">
                 <div style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; background: #f8f9fa;">Recent Users</div>
                 <div id="sac-session-list">
                     <div style="padding:20px; text-align:center; color:#999;">Loading...</div>
@@ -479,22 +484,28 @@ function soft_ai_live_chat_page() {
                 response.data.forEach(function(sess) {
                     var activeClass = (currentChatIp === sess.ip) ? 'background:#e6f7ff;' : '';
                     var badge = sess.unread > 0 ? '<span style="background:red; color:white; border-radius:50%; padding:2px 6px; font-size:10px; margin-left:5px;">'+sess.unread+'</span>' : '';
-                    html += '<div onclick="openAdminChat(\''+sess.ip+'\')" style="padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; '+activeClass+'">';
-                    html += '<strong>' + sess.ip + '</strong>'+badge+'<br><small style="color:#666">' + sess.time + '</small>';
-                    html += '</div>';
+                    
+                    var avatarUrl = sess.avatar ? sess.avatar : 'https://www.gravatar.com/avatar/?d=mp';
+                    var displayName = sess.name ? sess.name : sess.ip;
+
+                    html += '<div class="sac-session-item" onclick="openAdminChat(\''+sess.ip+'\', \''+displayName+'\')" style="'+activeClass+'">';
+                    html += '<img src="'+avatarUrl+'" class="sac-session-avatar">';
+                    html += '<div class="sac-session-info">';
+                    html += '<span class="sac-session-name">' + displayName + badge + '</span>';
+                    html += '<span class="sac-session-meta">' + sess.time + '</span>';
+                    html += '</div></div>';
                 });
                 jQuery('#sac-session-list').html(html);
             }
         });
     }
 
-    function openAdminChat(ip) {
+    function openAdminChat(ip, name) {
         currentChatIp = ip;
-        jQuery('#sac-current-user-title').text('Chatting with: ' + ip);
+        jQuery('#sac-current-user-title').text('Chatting with: ' + (name || ip));
         jQuery('#sac-mode-control').show(); 
         jQuery('#sac-delete-btn').show(); 
         
-        // Ensure canned msgs are loaded for auto-suggest
         if(allCannedMsgs.length === 0) {
             jQuery.get(ajaxurl, { action: 'sac_get_canned_msgs' }, function(res) {
                 if(res.success) allCannedMsgs = res.data;
@@ -513,26 +524,16 @@ function soft_ai_live_chat_page() {
         jQuery.get(ajaxurl, { action: 'sac_get_messages', ip: currentChatIp }, function(response) {
             if(response.success) {
                 var html = '';
-                var lastUserMsg = '';
-
                 response.data.messages.forEach(function(msg) {
                     var align = msg.is_admin ? 'text-align:right;' : 'text-align:left;';
                     var bg = msg.is_admin ? 'background:#0073aa; color:white;' : 'background:#e5e5e5; color:#333;';
-
                     var parsedContent = marked.parse(msg.content);
-                
                     html += '<div style="margin-bottom: 10px; ' + align + '">';
                     html += '<div class="sac-msg-bubble" style="display:inline-block; padding: 8px 12px; border-radius: 15px; max-width: 85%; ' + bg + '">' + parsedContent + '</div>';
                     html += '<div style="font-size:10px; color:#999; margin-top:2px;">' + msg.time + '</div>';
                     html += '</div>';
-                    
-                    if(!msg.is_admin) lastUserMsg = msg.content; 
                 });
-                var container = document.getElementById('sac-admin-messages');
-                container.innerHTML = html;
-                
-                // Auto Suggest Check
-                // checkAutoSuggestions(lastUserMsg);
+                document.getElementById('sac-admin-messages').innerHTML = html;
 
                 var isLive = response.data.is_live; 
                 var toggle = document.getElementById('sac-mode-toggle');
@@ -546,15 +547,13 @@ function soft_ai_live_chat_page() {
         });
     }
 
-    // 1. Lắng nghe sự kiện gõ phím của Admin
     jQuery('#sac-admin-input').on('keyup', function() {
         var currentInput = jQuery(this).val();
-        checkAutoSuggestions(currentInput); // Kiểm tra gợi ý dựa trên nội dung đang gõ
+        checkAutoSuggestions(currentInput);
     });
 
     function checkAutoSuggestions(msg) {
         var container = document.getElementById('sac-suggestions');
-        // Nếu ô nhập liệu trống hoặc không có danh sách câu mẫu thì ẩn gợi ý
         if (!msg || allCannedMsgs.length === 0) {
             container.style.display = 'none';
             return;
@@ -563,9 +562,7 @@ function soft_ai_live_chat_page() {
         var found = [];
         var lowerMsg = msg.toLowerCase();
 
-        // Duyệt qua tất cả câu mẫu
         allCannedMsgs.forEach(function(item) {
-            // Nếu nội dung Admin đang gõ có chứa shortcut của câu mẫu
             if (lowerMsg.includes(item.shortcut.toLowerCase())) {
                 found.push(item);
             }
@@ -574,17 +571,14 @@ function soft_ai_live_chat_page() {
         if (found.length > 0) {
             var html = '';
             found.forEach(function(item) {
-                // Xử lý chuỗi để tránh lỗi khi chèn vào thuộc tính onclick
                 var safeContent = item.content.replace(/"/g, '&quot;').replace(/'/g, "\\'");
-                
-                // Hiển thị toàn bộ nội dung câu mẫu
                 html += `<div class="sac-suggest-chip" onclick="insertCanned('${safeContent}')" style="max-width: 400px; white-space: normal; height: auto; padding: 8px 12px; border-radius: 8px;">
                     <span class="sac-suggest-label" style="display:block;">💡 Khớp từ tắt [${item.shortcut}]:</span>
                     <div style="font-size: 13px; line-height: 1.4;">${item.content}</div>
                 </div>`;
             });
             container.innerHTML = html;
-            container.style.display = 'flex'; // Sử dụng flex để các chip trông gọn hơn
+            container.style.display = 'flex';
             container.style.flexWrap = 'wrap';
         } else {
             container.style.display = 'none';
@@ -619,33 +613,25 @@ function soft_ai_live_chat_page() {
         var txt = jQuery('#sac-admin-input').val().trim();
         if(!txt || !currentChatIp) return;
         jQuery('#sac-admin-input').val(''); 
-        document.getElementById('sac-suggestions').style.display = 'none'; // Hide suggestion after sending
+        document.getElementById('sac-suggestions').style.display = 'none';
         jQuery.post(ajaxurl, { action: 'sac_send_reply', ip: currentChatIp, message: txt }, function(response) { loadLiveMessages(); });
     }
 
-    // --- Canned Responses Logic ---
     function toggleCanned() {
         var p = document.getElementById('sac-canned-popup');
         if(p.style.display === 'block') { p.style.display = 'none'; return; }
         p.style.display = 'block';
         document.getElementById('sac-canned-search').focus();
-        
         if(allCannedMsgs.length === 0) {
             jQuery.get(ajaxurl, { action: 'sac_get_canned_msgs' }, function(res) {
-                if(res.success) {
-                    allCannedMsgs = res.data;
-                    renderCannedList(allCannedMsgs);
-                }
+                if(res.success) { allCannedMsgs = res.data; renderCannedList(allCannedMsgs); }
             });
-        } else {
-            renderCannedList(allCannedMsgs);
-        }
+        } else { renderCannedList(allCannedMsgs); }
     }
 
     function renderCannedList(list) {
         var html = '';
         list.forEach(function(item) {
-            // Encode content to allow safe passing to function
             var safeContent = item.content.replace(/"/g, '&quot;').replace(/'/g, "\\'");
             html += `<div class="sac-canned-item" onclick="insertCanned('${safeContent}')">
                 <span class="sac-canned-shortcut">[${item.shortcut}]</span> ${item.content.substring(0, 40)}...
@@ -664,7 +650,6 @@ function soft_ai_live_chat_page() {
     }
 
     function insertCanned(text) {
-        // Decode simple entities if necessary, but here we just pass pure text
         var decoded = text.replace(/&quot;/g, '"');
         jQuery('#sac-admin-input').val(decoded);
         document.getElementById('sac-canned-popup').style.display = 'none';
@@ -672,7 +657,6 @@ function soft_ai_live_chat_page() {
         document.getElementById('sac-admin-input').focus();
     }
 
-    // Close popup if clicking outside
     jQuery(document).on('click', function(e) {
         if (!jQuery(e.target).closest('#sac-canned-popup, button[onclick="toggleCanned()"]').length) {
             jQuery('#sac-canned-popup').hide();
@@ -681,10 +665,7 @@ function soft_ai_live_chat_page() {
 
     jQuery(document).ready(function(){
         jQuery('#sac-delete-btn').hide(); 
-        // Preload canned messages
-        jQuery.get(ajaxurl, { action: 'sac_get_canned_msgs' }, function(res) {
-            if(res.success) allCannedMsgs = res.data;
-        });
+        jQuery.get(ajaxurl, { action: 'sac_get_canned_msgs' }, function(res) { if(res.success) allCannedMsgs = res.data; });
         loadLiveSessions();
         setInterval(loadLiveSessions, 10000); 
     });
@@ -693,7 +674,7 @@ function soft_ai_live_chat_page() {
 }
 
 // ---------------------------------------------------------
-// 1.6. ADMIN AJAX HANDLERS (UPDATED)
+// 1.6. ADMIN AJAX HANDLERS
 // ---------------------------------------------------------
 
 add_action('wp_ajax_sac_get_sessions', 'soft_ai_ajax_get_sessions');
@@ -701,22 +682,37 @@ add_action('wp_ajax_sac_get_messages', 'soft_ai_ajax_get_messages');
 add_action('wp_ajax_sac_send_reply', 'soft_ai_ajax_send_reply');
 add_action('wp_ajax_sac_toggle_mode', 'soft_ai_ajax_toggle_mode');
 add_action('wp_ajax_sac_delete_conversation', 'soft_ai_ajax_delete_conversation');
-add_action('wp_ajax_sac_get_canned_msgs', 'soft_ai_ajax_get_canned_msgs'); // NEW
+add_action('wp_ajax_sac_get_canned_msgs', 'soft_ai_ajax_get_canned_msgs');
 
 function soft_ai_ajax_get_sessions() {
     global $wpdb;
-    $table = $wpdb->prefix . 'soft_ai_chat_logs';
+    $table_logs = $wpdb->prefix . 'soft_ai_chat_logs';
+    $table_users = $wpdb->prefix . 'soft_ai_chat_users';
+
+    // Join with Users table to get Name and Avatar
     $results = $wpdb->get_results("
-        SELECT user_ip as ip, MAX(time) as latest_time, 
-        SUM(CASE WHEN is_read = 0 AND provider != 'live_admin' THEN 1 ELSE 0 END) as unread
-        FROM $table 
-        WHERE time > NOW() - INTERVAL 24 HOUR 
-        GROUP BY user_ip 
+        SELECT 
+            l.user_ip as ip, 
+            MAX(l.time) as latest_time, 
+            SUM(CASE WHEN l.is_read = 0 AND l.provider != 'live_admin' THEN 1 ELSE 0 END) as unread,
+            u.name,
+            u.avatar
+        FROM $table_logs l
+        LEFT JOIN $table_users u ON l.user_ip = u.user_id
+        WHERE l.time > NOW() - INTERVAL 48 HOUR 
+        GROUP BY l.user_ip 
         ORDER BY latest_time DESC
     ");
+    
     $data = [];
     foreach($results as $r) {
-        $data[] = ['ip' => $r->ip, 'time' => date('H:i', strtotime($r->latest_time)), 'unread' => $r->unread];
+        $data[] = [
+            'ip' => $r->ip, 
+            'time' => date('H:i d/m', strtotime($r->latest_time)), 
+            'unread' => $r->unread,
+            'name' => $r->name,
+            'avatar' => $r->avatar
+        ];
     }
     wp_send_json_success($data);
 }
@@ -778,7 +774,6 @@ function soft_ai_ajax_send_reply() {
     wp_send_json_success();
 }
 
-// NEW AJAX HANDLER FOR CANNED MESSAGES
 function soft_ai_ajax_get_canned_msgs() {
     global $wpdb;
     $table = $wpdb->prefix . 'soft_ai_canned_msgs';
@@ -788,27 +783,27 @@ function soft_ai_ajax_get_canned_msgs() {
 
 
 // ---------------------------------------------------------
-// 1.7. HISTORY PAGE (REDESIGNED: CONVERSATION VIEW + MARKDOWN)
+// 1.7. HISTORY PAGE
 // ---------------------------------------------------------
 
 function soft_ai_chat_history_page() {
     global $wpdb;
-    $table_name = $wpdb->prefix . 'soft_ai_chat_logs';
+    $table_logs = $wpdb->prefix . 'soft_ai_chat_logs';
+    $table_users = $wpdb->prefix . 'soft_ai_chat_users';
 
     // Xóa toàn bộ
     if (isset($_POST['clear_all_logs']) && check_admin_referer('clear_all_logs')) {
-        $wpdb->query("TRUNCATE TABLE $table_name");
+        $wpdb->query("TRUNCATE TABLE $table_logs");
         echo '<div class="updated"><p>All logs cleared.</p></div>';
     }
 
-    // Xóa 1 thread (Conversation)
+    // Xóa 1 thread
     if (isset($_POST['delete_thread']) && isset($_POST['thread_ip']) && check_admin_referer('delete_thread_' . $_POST['thread_ip'])) {
         $del_ip = sanitize_text_field($_POST['thread_ip']);
-        $wpdb->delete($table_name, ['user_ip' => $del_ip]);
+        $wpdb->delete($table_logs, ['user_ip' => $del_ip]);
         echo '<div class="updated"><p>Conversation deleted.</p></div>';
     }
 
-    // XEM CHI TIẾT 1 CUỘC TRÒ CHUYỆN
     $view_ip = isset($_GET['view_ip']) ? sanitize_text_field($_GET['view_ip']) : null;
     
     ?>
@@ -828,60 +823,41 @@ function soft_ai_chat_history_page() {
         <hr class="wp-header-end">
 
         <style>
-            /* Base Styles */
             .sac-container { margin-top: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-            
-            /* List View Styles */
             .sac-thread-list { background: #fff; border: 1px solid #ccd0d4; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-radius: 4px; overflow: hidden; }
             .sac-thread-item { display: flex; align-items: center; padding: 15px 20px; border-bottom: 1px solid #f0f0f1; transition: background 0.2s; position: relative; }
-            .sac-thread-item:last-child { border-bottom: none; }
             .sac-thread-item:hover { background: #f6f7f7; }
-            
-            .sac-avatar { width: 45px; height: 45px; background: #e0e0e0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #777; font-size: 18px; margin-right: 15px; }
+            .sac-avatar { width: 45px; height: 45px; background: #e0e0e0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #777; font-size: 18px; margin-right: 15px; overflow: hidden; }
+            .sac-avatar img { width: 100%; height: 100%; object-fit: cover; }
             .sac-thread-info { flex: 1; }
             .sac-ip-title { font-size: 16px; font-weight: 600; color: #1d2327; margin-bottom: 4px; display: block; text-decoration: none; }
-            .sac-ip-title:hover { color: #2271b1; }
             .sac-thread-meta { font-size: 13px; color: #646970; }
             .sac-badge { background: #f0f0f1; color: #50575e; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 5px; font-weight: 500; border: 1px solid #dcdcde; }
-            
             .sac-action-btn { margin-left: 10px; text-decoration: none; padding: 6px 12px; border: 1px solid #2271b1; color: #2271b1; border-radius: 4px; font-size: 13px; transition: all 0.2s; }
             .sac-action-btn:hover { background: #2271b1; color: #fff; }
             .sac-del-btn { border-color: #d63638; color: #d63638; background: transparent; cursor: pointer; }
             .sac-del-btn:hover { background: #d63638; color: #fff; }
 
-            /* Pagination */
-            .sac-pagination { margin-top: 20px; display: flex; justify-content: center; gap: 5px; }
-            .sac-page-num { padding: 5px 10px; border: 1px solid #ddd; background: #fff; text-decoration: none; color: #333; border-radius: 3px; }
-            .sac-page-num.current { background: #2271b1; color: #fff; border-color: #2271b1; }
-
-            /* Chat Detail View (Bubbles) */
             .sac-chat-window { max-width: 800px; margin: 0 auto; background: #fff; border: 1px solid #ccd0d4; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
             .sac-chat-header { background: #f8f9fa; padding: 15px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
             .sac-chat-body { padding: 20px; background: #fff; max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
-            
             .sac-bubble-row { display: flex; width: 100%; margin-bottom: 10px; }
             .sac-bubble-row.user { justify-content: flex-end; }
             .sac-bubble-row.bot { justify-content: flex-start; }
-            
             .sac-bubble { max-width: 70%; padding: 10px 15px; border-radius: 18px; position: relative; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
             .sac-bubble-row.user .sac-bubble { background: #0073aa; color: #fff; border-bottom-right-radius: 4px; }
             .sac-bubble-row.bot .sac-bubble { background: #f0f0f1; color: #1d2327; border-bottom-left-radius: 4px; border: 1px solid #e5e5e5; }
-            .sac-bubble-row.bot .sac-bubble strong { color: #0073aa; }
-            .sac-bubble-row.bot .sac-bubble img { max-width: 100%; height: auto; border-radius: 8px; margin-top: 5px; }
-            .sac-bubble-row.admin .sac-bubble { background: #e6f7ff; border: 1px solid #91d5ff; color: #0050b3; } /* For Live Chat Replies */
-
+            .sac-bubble-row.admin .sac-bubble { background: #e6f7ff; border: 1px solid #91d5ff; color: #0050b3; }
             .sac-time { font-size: 11px; color: #888; margin-top: 4px; display: block; opacity: 0.8; }
-            .sac-bubble-row.user .sac-time { text-align: right; color: rgba(255,255,255,0.8); }
-
+            .sac-pagination { margin-top: 20px; display: flex; justify-content: center; gap: 5px; }
+            .sac-page-num { padding: 5px 10px; border: 1px solid #ddd; background: #fff; text-decoration: none; color: #333; border-radius: 3px; }
+            .sac-page-num.current { background: #2271b1; color: #fff; border-color: #2271b1; }
         </style>
 
         <div class="sac-container">
             <?php 
             if ($view_ip): 
-                // --- VIEW DETAIL (TRANSCRIPT) ---
-                $logs = $wpdb->get_results($wpdb->prepare("SELECT * FROM $table_name WHERE user_ip = %s ORDER BY time ASC", $view_ip));
-                
-                // Load Marked.js for rendering
+                $logs = $wpdb->get_results($wpdb->prepare("SELECT * FROM $table_logs WHERE user_ip = %s ORDER BY time ASC", $view_ip));
                 echo '<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>';
                 ?>
                 <div class="sac-chat-window">
@@ -896,63 +872,34 @@ function soft_ai_chat_history_page() {
                     </div>
                     <div class="sac-chat-body">
                         <?php if ($logs): foreach ($logs as $log): 
-                            // Determine types to show properly
                             $is_admin_reply = ($log->provider === 'live_admin');
-                            
-                            // User Message
                             if (!empty($log->question) && $log->provider !== 'live_admin') {
                                 $qid = 'q-' . $log->id;
-                                echo '<div class="sac-bubble-row user">
-                                        <div class="sac-bubble">
-                                            <div id="'.$qid.'"></div>
-                                            <span class="sac-time">' . date('H:i, d/M', strtotime($log->time)) . '</span>
-                                        </div>
-                                        <textarea id="raw-'.$qid.'" style="display:none;">'.esc_textarea($log->question).'</textarea>
-                                        <script>
-                                            document.getElementById("'.$qid.'").innerHTML = marked.parse(document.getElementById("raw-'.$qid.'").value);
-                                        </script>
-                                      </div>';
+                                echo '<div class="sac-bubble-row user"><div class="sac-bubble"><div id="'.$qid.'"></div><span class="sac-time">' . date('H:i, d/M', strtotime($log->time)) . '</span></div><textarea id="raw-'.$qid.'" style="display:none;">'.esc_textarea($log->question).'</textarea><script>document.getElementById("'.$qid.'").innerHTML = marked.parse(document.getElementById("raw-'.$qid.'").value);</script></div>';
                             }
-                            
-                            // Bot/Admin Response
                             if (!empty($log->answer)) {
                                 $cls = $is_admin_reply ? 'admin' : 'bot';
                                 $aid = 'a-' . $log->id;
-                                // We keep raw HTML/Markdown here
-                                $raw_answer = $log->answer; 
-                                
-                                echo '<div class="sac-bubble-row bot '.$cls.'">
-                                        <div class="sac-bubble">
-                                             <div id="'.$aid.'"></div>
-                                             <span class="sac-time">' . date('H:i, d/M', strtotime($log->time)) . '</span>
-                                        </div>
-                                        <textarea id="raw-'.$aid.'" style="display:none;">'.esc_textarea($raw_answer).'</textarea>
-                                        <script>
-                                            var raw = document.getElementById("raw-'.$aid.'").value;
-                                            document.getElementById("'.$aid.'").innerHTML = marked.parse(raw);
-                                        </script>
-                                      </div>';
+                                echo '<div class="sac-bubble-row bot '.$cls.'"><div class="sac-bubble"><div id="'.$aid.'"></div><span class="sac-time">' . date('H:i, d/M', strtotime($log->time)) . '</span></div><textarea id="raw-'.$aid.'" style="display:none;">'.esc_textarea($log->answer).'</textarea><script>var raw = document.getElementById("raw-'.$aid.'").value; document.getElementById("'.$aid.'").innerHTML = marked.parse(raw);</script></div>';
                             }
                         endforeach; else: echo '<p style="text-align:center; color:#999;">No messages found.</p>'; endif; ?>
                     </div>
                 </div>
 
             <?php else: 
-                // --- VIEW LIST (GROUP BY IP) ---
-                // Pagination Logic
                 $per_page = 15;
                 $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
                 $offset = ($paged - 1) * $per_page;
                 
-                // Count unique IPs
-                $total_threads = $wpdb->get_var("SELECT COUNT(DISTINCT user_ip) FROM $table_name");
+                $total_threads = $wpdb->get_var("SELECT COUNT(DISTINCT user_ip) FROM $table_logs");
                 $total_pages = ceil($total_threads / $per_page);
                 
-                // Get Grouped Data
+                // Join Users table
                 $threads = $wpdb->get_results($wpdb->prepare("
-                    SELECT user_ip, MAX(time) as last_time, COUNT(*) as msg_count 
-                    FROM $table_name 
-                    GROUP BY user_ip 
+                    SELECT l.user_ip, MAX(l.time) as last_time, COUNT(*) as msg_count, u.name, u.avatar
+                    FROM $table_logs l
+                    LEFT JOIN $table_users u ON l.user_ip = u.user_id
+                    GROUP BY l.user_ip 
                     ORDER BY last_time DESC 
                     LIMIT %d OFFSET %d
                 ", $per_page, $offset));
@@ -960,13 +907,17 @@ function soft_ai_chat_history_page() {
                 
                 <div class="sac-thread-list">
                     <?php if ($threads): foreach ($threads as $th): 
-                        $first_char = strtoupper(substr($th->user_ip, 0, 1));
                         $is_numeric_ip = filter_var($th->user_ip, FILTER_VALIDATE_IP);
-                        $display_name = $is_numeric_ip ? "Visitor (" . $th->user_ip . ")" : $th->user_ip;
+                        $display_name = $th->name ? $th->name : ($is_numeric_ip ? "Visitor (" . $th->user_ip . ")" : $th->user_ip);
+                        $avatar_url = $th->avatar ? $th->avatar : '';
                         $time_ago = human_time_diff(strtotime($th->last_time), current_time('timestamp')) . ' ago';
                     ?>
                     <div class="sac-thread-item">
-                        <div class="sac-avatar"><?php echo $is_numeric_ip ? '🌐' : '👤'; ?></div>
+                        <div class="sac-avatar">
+                            <?php if($avatar_url): ?>
+                                <img src="<?php echo esc_url($avatar_url); ?>">
+                            <?php else: echo $is_numeric_ip ? '🌐' : '👤'; endif; ?>
+                        </div>
                         <div class="sac-thread-info">
                             <a href="?page=soft-ai-chat-history&view_ip=<?php echo urlencode($th->user_ip); ?>" class="sac-ip-title">
                                 <?php echo esc_html($display_name); ?>
@@ -1016,9 +967,6 @@ function soft_ai_chat_history_page() {
 // ---------------------------------------------------------
 // 2. CONTEXT & STATE MANAGER
 // ---------------------------------------------------------
-/**
- * Class nhận diện các Plugin Form đang hoạt động
- */
 class Soft_AI_Form_Detector {
     public static function get_active_form_plugins() {
         $active_plugins = get_option('active_plugins');
@@ -1101,7 +1049,7 @@ class Soft_AI_Context {
         if ($this->source === 'widget' && function_exists('WC')) WC()->cart->empty_cart();
         else {
             $this->set('cart', []);
-            $this->set('coupons', []); // Clear coupons on empty
+            $this->set('coupons', []); 
         }
     }
 
@@ -1182,7 +1130,6 @@ function soft_ai_log_chat($question, $answer, $source = 'widget', $provider_over
     global $wpdb;
     $opt = get_option('soft_ai_chat_settings');
     
-    // Nếu là Live Chat messages, luôn lưu. Nếu AI chat thường, check setting.
     $is_live = (strpos($provider_override, 'live_') !== false);
     if (empty($opt['save_history']) && !$is_live) return;
 
@@ -1210,6 +1157,36 @@ function soft_ai_clean_text_for_social($content) {
     return trim(wp_strip_all_tags($content));
 }
 
+// --- NEW FUNCTION: Fetch FB Profile ---
+function soft_ai_fetch_and_save_fb_user($sender_id, $page_token) {
+    global $wpdb;
+    $table_users = $wpdb->prefix . 'soft_ai_chat_users';
+    
+    // Check if user exists
+    $exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_users WHERE user_id = %s", $sender_id));
+    if ($exists) return; // Already saved
+
+    // Fetch from Graph API
+    $url = "https://graph.facebook.com/v21.0/$sender_id?fields=first_name,last_name,profile_pic&access_token=$page_token";
+    $response = wp_remote_get($url);
+
+    if (!is_wp_error($response)) {
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        if (isset($body['first_name'])) {
+            $name = ($body['last_name'] ?? '') . ' ' . ($body['first_name'] ?? '');
+            $avatar = $body['profile_pic'] ?? '';
+            
+            $wpdb->replace($table_users, [
+                'user_id' => $sender_id,
+                'name' => trim($name),
+                'avatar' => $avatar,
+                'platform' => 'facebook',
+                'updated_at' => current_time('mysql')
+            ]);
+        }
+    }
+}
+
 /**
  * Main AI Engine + State Machine
  */
@@ -1219,7 +1196,6 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
     $context = new Soft_AI_Context($user_id, $platform);
     
     // --- 0. CHECK LIVE CHAT STATUS ---
-    // Keywords to enter Live Mode
     $human_keywords = ['human', 'người thật', 'nhân viên', 'tư vấn viên', 'gặp người', 'chat với người', 'support', 'live chat'];
     $exit_keywords = ['thoát', 'exit', 'bye', 'bot', 'gặp bot'];
     
@@ -1228,7 +1204,6 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
     if (in_array($clean_q, $human_keywords)) {
         $context->set('live_chat_mode', true);
         $msg = "Đã chuyển sang chế độ Chat với Nhân Viên 🔴.\nVui lòng nhắn tin, nhân viên sẽ trả lời bạn sớm nhất có thể.";
-        // Log this switching event
         soft_ai_log_chat($question, $msg, $platform, 'system_switch');
         return $msg;
     }
@@ -1238,17 +1213,12 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
         return "Đã quay lại chế độ AI Bot 🤖. Bạn cần giúp gì không?";
     }
 
-    // If in Live Mode, DO NOT call AI
     if ($context->get('live_chat_mode')) {
-        // Save user message to DB so Admin can see it
         soft_ai_log_chat($question, '', $platform, 'live_user', 'human');
-        // Return null/empty tells the controller to NOT reply with AI, just wait.
-        // But for UX, we might want to return nothing to widget, just "sent".
         return "[WAIT_FOR_HUMAN]"; 
     }
 
-    // --- 0.5. CHECK CANNED RESPONSES (NEW FEATURE) ---
-    // Kiểm tra xem câu hỏi có khớp với Shortcut nào không (Exact match hoặc Contain)
+    // --- 0.5. CHECK CANNED RESPONSES ---
     $table_canned = $wpdb->prefix . 'soft_ai_canned_msgs';
     $canned_match = $wpdb->get_row($wpdb->prepare(
         "SELECT content FROM $table_canned WHERE LOWER(shortcut) = %s OR %s LIKE CONCAT('%%', LOWER(shortcut), '%%') LIMIT 1",
@@ -1257,16 +1227,13 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
 
     if ($canned_match) {
         $msg = $canned_match->content;
-        // Nếu là Social, dọn dẹp markdown
         if ($platform === 'facebook' || $platform === 'zalo') {
             return soft_ai_clean_text_for_social($msg);
         }
         return $msg;
     }
 
-    // ----------------------------------
-
-    // 1. Flow Interruption (Huỷ bỏ)
+    // 1. Flow Interruption
     $current_step = $context->get('bot_collecting_info_step');
     $cancel_keywords = ['huỷ', 'hủy', 'cancel', 'thôi', 'stop', 'thoát'];
     if (in_array($clean_q, $cancel_keywords)) {
@@ -1306,7 +1273,7 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
     
     // 5. Prompt Engineering & RAG
     $site_context = soft_ai_chat_get_context($question);
-    $form_context = Soft_AI_Form_Detector::get_form_fields_context(); // Lấy thông tin form
+    $form_context = Soft_AI_Form_Detector::get_form_fields_context();
     $user_instruction = $options['system_prompt'] ?? '';
     
     $system_prompt = "You are a helpful AI Consultant for this website.\n" .
@@ -1366,7 +1333,6 @@ function soft_ai_process_order_logic($intent, $context) {
             foreach ($coupons as $c) {
                 $code = $c->post_title;
                 $wc_coupon = new WC_Coupon($code);
-                // Basic validation checks
                 if ($wc_coupon->get_usage_limit() > 0 && $wc_coupon->get_usage_count() >= $wc_coupon->get_usage_limit()) continue;
                 if ($wc_coupon->get_date_expires() && $wc_coupon->get_date_expires()->getTimestamp() < time()) continue;
 
@@ -1394,7 +1360,6 @@ function soft_ai_process_order_logic($intent, $context) {
                     return "Mã này đã được áp dụng rồi ạ.";
                 }
             } else {
-                // For Social/Transient users, store for later
                 $saved_coupons = $context->get('coupons') ?: [];
                 if (!in_array($code, $saved_coupons)) {
                     $saved_coupons[] = $code;
@@ -1634,7 +1599,6 @@ function soft_ai_handle_ordering_steps($message, $step, $context) {
         case 'final_inquiry':
             $context->set('temp_inquiry', $clean_message);
             
-            // LƯU VÀO DATABASE (Chat Logs với phân loại Lead)
             global $wpdb;
             $lead_data = sprintf(
                 "LEAD CAPTURED:\nName: %s\nPhone: %s\nEmail: %s\nInquiry: %s",
@@ -1646,7 +1610,6 @@ function soft_ai_handle_ordering_steps($message, $step, $context) {
             
             soft_ai_log_chat("FORM_SUBMISSION", $lead_data, $source, 'lead_capture', 'system');
             
-            // Gửi email thông báo cho Admin (Sử dụng hàm có sẵn của bạn)
             soft_ai_notify_admin_by_email($lead_data, "AI Lead Form", $_SERVER['REMOTE_ADDR']);
 
             $context->set('bot_collecting_info_step', null);
@@ -1707,7 +1670,6 @@ function soft_ai_finalize_order($context, $gateway_or_code) {
                 $p = wc_get_product($vid ? $vid : $pid);
                 if ($p) $order->add_product($p, $item['qty']);
             }
-            // Apply coupons stored in context for non-widget
             $stored_coupons = $context->get('coupons') ?: [];
             foreach($stored_coupons as $code) {
                 $order->apply_coupon($code);
@@ -1893,7 +1855,6 @@ function soft_ai_chat_handle_widget_request($request) {
 
     $answer = soft_ai_generate_answer($question, 'widget');
     
-    // If answer is the special wait flag, return empty to frontend so it just waits
     if ($answer === '[WAIT_FOR_HUMAN]') {
         return rest_ensure_response(['answer' => '', 'live_mode' => true]);
     }
@@ -1904,12 +1865,10 @@ function soft_ai_chat_handle_widget_request($request) {
 
 function soft_ai_chat_poll_messages($request) {
     global $wpdb;
-    // Client polls for new admin messages
     $ip = $_SERVER['REMOTE_ADDR'];
     $table = $wpdb->prefix . 'soft_ai_chat_logs';
     $last_id = (int) ($request->get_json_params()['last_id'] ?? 0);
     
-    // Fetch only admin replies newer than last_id
     $new_msgs = $wpdb->get_results($wpdb->prepare("SELECT id, answer, time FROM $table WHERE user_ip = %s AND provider = 'live_admin' AND id > %d ORDER BY time ASC", $ip, $last_id));
 
     $data = [];
@@ -1939,6 +1898,9 @@ function soft_ai_chat_webhook_facebook($request) {
                 if (isset($event['message']['text']) && !isset($event['message']['is_echo'])) {
                     $sender = $event['sender']['id'];
                     $user_msg = $event['message']['text'];
+                    
+                    // Fetch & Save FB Profile
+                    soft_ai_fetch_and_save_fb_user($sender, $options['fb_page_token']);
 
                     soft_ai_notify_admin_by_email($user_msg, 'Facebook', $sender);
 
@@ -1992,7 +1954,7 @@ function soft_ai_chat_webhook_zalo($request) {
 }
 
 // ---------------------------------------------------------
-// 6. FRONTEND WIDGETS (UPDATED HIGHLIGHT)
+// 6. FRONTEND WIDGETS
 // ---------------------------------------------------------
 
 add_action('wp_footer', 'soft_ai_chat_inject_widget');
@@ -2043,21 +2005,9 @@ function soft_ai_chat_inject_widget() {
     ?>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
     <style>
-        .sac-msg.bot table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 10px 0;
-            font-size: 13px;
-        }
-        .sac-msg.bot th, .sac-msg.bot td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        .sac-msg.bot th {
-            background-color: #f2f2f2;
-            font-weight: bold;
-        }
+        .sac-msg.bot table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
+        .sac-msg.bot th, .sac-msg.bot td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .sac-msg.bot th { background-color: <?php echo esc_attr($color); ?>; font-weight: bold; }
         #sac-trigger {
             position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px;
             background: <?php echo esc_attr($color); ?>; color: white; border-radius: 50%;
@@ -2096,7 +2046,7 @@ function soft_ai_chat_inject_widget() {
             color: #0050b3; 
             border-bottom-left-radius: 2px; 
             position: relative;
-            padding-top: 20px; /* Space for label */
+            padding-top: 20px; 
         }
 
         .sac-input-area { padding: 12px; border-top: 1px solid #eee; background: white; display: flex; gap: 8px; }
@@ -2158,13 +2108,12 @@ function soft_ai_chat_inject_widget() {
                         const msgs = document.getElementById('sac-messages');
                         data.messages.forEach(m => {
                             lastMsgId = Math.max(lastMsgId, parseInt(m.id));
-                            // Use 'admin' class for highlighted messages
                             msgs.innerHTML += `<div class="sac-msg admin">${marked.parse(m.text)}</div>`;
                         });
                         msgs.scrollTop = msgs.scrollHeight;
                     }
                 } catch(e) {}
-            }, 5000); // Poll every 5s
+            }, 5000); 
         }
 
         function stopPolling() {
@@ -2196,7 +2145,7 @@ function soft_ai_chat_inject_widget() {
                 if (data.answer) {
                     msgs.innerHTML += `<div class="sac-msg bot">${marked.parse(data.answer)}</div>`;
                 } else if(data.live_mode) {
-                    // Do nothing, just sent. 
+                    
                 } else {
                     msgs.innerHTML += `<div class="sac-msg bot" style="color:red">Lỗi: ${data.message || 'Unknown'}</div>`;
                 }
