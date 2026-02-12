@@ -134,6 +134,10 @@ function soft_ai_chat_settings_init() {
     add_settings_field('enable_zalo_widget', __('Show Zalo Widget', 'soft-ai-chat'), 'soft_ai_render_checkbox', 'softAiChat', 'soft_ai_chat_social', ['field' => 'enable_zalo_widget']);
     add_settings_field('zalo_oa_id', __('Zalo OA ID', 'soft-ai-chat'), 'soft_ai_render_text', 'softAiChat', 'soft_ai_chat_social', ['field' => 'zalo_oa_id', 'desc' => 'Required for Chat Widget.']);
     add_settings_field('zalo_access_token', __('Zalo OA Access Token', 'soft-ai-chat'), 'soft_ai_render_token', 'softAiChat', 'soft_ai_chat_social', ['field' => 'zalo_access_token', 'desc' => 'Required for AI Auto-Reply.']);
+
+    // Section 5: Form Integrations (NEW)
+    add_settings_section('soft_ai_form_detect', __('Form Integrations', 'soft-ai-chat'), 'soft_ai_form_detect_desc', 'softAiChat');
+    add_settings_field('detected_forms', __('Detected Form Plugins', 'soft-ai-chat'), 'soft_ai_render_detected_forms', 'softAiChat', 'soft_ai_form_detect');
 }
 
 // --- Generic Render Helpers ---
@@ -217,6 +221,48 @@ function soft_ai_chat_options_page() {
         </form>
     </div>
     <?php
+}
+
+/**
+ * Description for the Form Detection section
+ */
+function soft_ai_form_detect_desc() {
+    echo '<p>The AI automatically detects active form plugins to optimize lead capture flows.</p>';
+}
+
+/**
+ * Renders the list of detected form plugins in the settings panel
+ */
+function soft_ai_render_detected_forms() {
+    // List of supported form plugins
+    $form_plugins = [
+        'contact-form-7/wp-contact-form-7.php' => 'Contact Form 7',
+        'elementor/elementor.php'              => 'Elementor Forms',
+        'forminator/forminator.php'            => 'Forminator Forms',
+        'wpforms-lite/wpforms.php'             => 'WPForms',
+        'fluentform/fluentform.php'            => 'Fluent Forms',
+        'formidable/formidable.php'            => 'Formidable Forms',
+        'ninja-forms/ninja-forms.php'          => 'Ninja Forms'
+    ];
+
+    echo '<div style="background: #fff; border: 1px solid #ccd0d4; padding: 10px; border-radius: 4px; max-width: 400px;">';
+    echo '<ul style="margin: 0; padding-left: 20px;">';
+    
+    $any_detected = false;
+    foreach ($form_plugins as $path => $name) {
+        if (is_plugin_active($path)) {
+            echo '<li><span style="color: #46b450; font-weight: bold;">✔</span> ' . esc_html($name) . ' <small>(Active)</small></li>';
+            $any_detected = true;
+        }
+    }
+
+    if (!$any_detected) {
+        echo '<li style="color: #d63638;">No specific form plugins detected. AI will use generic data collection.</li>';
+    }
+
+    echo '</ul>';
+    echo '</div>';
+    echo '<p class="description">If active, AI will attempt to sync lead data with these systems.</p>';
 }
 
 // ---------------------------------------------------------
@@ -970,6 +1016,37 @@ function soft_ai_chat_history_page() {
 // ---------------------------------------------------------
 // 2. CONTEXT & STATE MANAGER
 // ---------------------------------------------------------
+/**
+ * Class nhận diện các Plugin Form đang hoạt động
+ */
+class Soft_AI_Form_Detector {
+    public static function get_active_form_plugins() {
+        $active_plugins = get_option('active_plugins');
+        $form_plugins = [
+            'contact-form-7/wp-contact-form-7.php' => 'Contact Form 7',
+            'elementor/elementor.php'              => 'Elementor Forms',
+            'forminator/forminator.php'            => 'Forminator',
+            'wpforms-lite/wpforms.php'             => 'WPForms',
+            'fluentform/fluentform.php'            => 'Fluent Forms',
+            'formidable/formidable.php'            => 'Formidable Forms',
+            'ninja-forms/ninja-forms.php'          => 'Ninja Forms'
+        ];
+        
+        $detected = [];
+        foreach ($form_plugins as $path => $name) {
+            if (in_array($path, $active_plugins) || is_plugin_active($path)) {
+                $detected[] = $name;
+            }
+        }
+        return $detected;
+    }
+
+    public static function get_form_fields_context() {
+        $plugins = self::get_active_form_plugins();
+        if (empty($plugins)) return "No specialized form plugins detected. Use generic data collection.";
+        return "Detected Form Plugins: " . implode(', ', $plugins) . ". Please collect: Full Name, Email, Phone, and Inquiry.";
+    }
+}
 
 class Soft_AI_Context {
     public $user_id;
@@ -1229,17 +1306,19 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
     
     // 5. Prompt Engineering & RAG
     $site_context = soft_ai_chat_get_context($question);
+    $form_context = Soft_AI_Form_Detector::get_form_fields_context(); // Lấy thông tin form
     $user_instruction = $options['system_prompt'] ?? '';
     
     $system_prompt = "You are a helpful AI Consultant for this website.\n" .
                      ($user_instruction ? "Persona: $user_instruction\n" : "") .
-                     "Website Content:\n" . $site_context . "\n\n" .
+                     "Website Content:\n" . $site_context . "\n" .
+                     "Form Context: " . $form_context . "\n\n" .
                      "INSTRUCTIONS:\n" . 
-                     "1. Answer the user's question based on the Website Content provided.\n" .
-                     "2. If the user asks about products, provide information (price, details) and the Link.\n" .
-                     "3. Do NOT try to sell, add to cart, or process orders. Just provide information.\n" .
-                     "4. Answer in Vietnamese. Keep it concise and friendly." .
-                     "5. If you use tables, use standard Markdown table format. Keep tables simple with 2-3 columns maximum for mobile view.";
+                     "1. Answer based on Website Content.\n" .
+                     "2. If the user wants to contact, leave a message, or register, follow the 'collecting_info' flow.\n" .
+                     "3. You MUST collect: Full Name, Phone, and their Question/Inquiry.\n" .
+                     "4. Once collected, inform them that 'Thông tin đã được ghi nhận'.\n" .
+                     "5. Return JSON with action: 'lead_capture' when they start providing contact info.";
 
     // 6. Call API
     $ai_response = soft_ai_chat_call_api($provider, $model, $system_prompt, $question, $options);
@@ -1274,6 +1353,10 @@ function soft_ai_process_order_logic($intent, $context) {
     $source = $context->source;
 
     switch ($action) {
+        case 'lead_capture':
+            $context->set('bot_collecting_info_step', 'fullname');
+            return "Dạ, để tiện hỗ trợ nhất, cho em xin Họ và tên của mình ạ?";
+
         case 'list_coupons':
             $args = ['post_type' => 'shop_coupon', 'post_status' => 'publish', 'posts_per_page' => 5];
             $coupons = get_posts($args);
@@ -1499,11 +1582,16 @@ function soft_ai_handle_ordering_steps($message, $step, $context) {
             return "Dạ, cho em xin địa chỉ Email để gửi thông tin đơn hàng và thanh toán ạ?";
 
         case 'email':
-            if (!is_email($clean_message)) return "Email không hợp lệ. Vui lòng nhập lại (ví dụ: ten@gmail.com):";
+            if (!is_email($clean_message)) return "Email không hợp lệ. Vui lòng nhập lại:";
             $context->set('temp_email', $clean_message);
-            if ($source === 'widget') WC()->customer->set_billing_email($clean_message);
-            $context->set('bot_collecting_info_step', 'address');
-            return "Cuối cùng, cho em xin Địa chỉ giao hàng cụ thể ạ?";
+            
+            if ($context->get_cart_count() > 0) {
+                $context->set('bot_collecting_info_step', 'address');
+                return "Dạ, cho em xin Địa chỉ giao hàng cụ thể ạ?";
+            } else {
+                $context->set('bot_collecting_info_step', 'final_inquiry');
+                return "Dạ bạn cần bên em tư vấn chi tiết về vấn đề gì ạ?";
+            }
 
         case 'address':
             $context->set('temp_address', $clean_message);
@@ -1542,6 +1630,27 @@ function soft_ai_handle_ordering_steps($message, $step, $context) {
 
             if (!$selected) return "Phương thức chưa đúng. Vui lòng nhập lại (ví dụ: VietQR, PayPal, COD).";
             return soft_ai_finalize_order($context, $selected);
+
+        case 'final_inquiry':
+            $context->set('temp_inquiry', $clean_message);
+            
+            // LƯU VÀO DATABASE (Chat Logs với phân loại Lead)
+            global $wpdb;
+            $lead_data = sprintf(
+                "LEAD CAPTURED:\nName: %s\nPhone: %s\nEmail: %s\nInquiry: %s",
+                $context->get('temp_name'),
+                $context->get('temp_phone'),
+                $context->get('temp_email'),
+                $clean_message
+            );
+            
+            soft_ai_log_chat("FORM_SUBMISSION", $lead_data, $source, 'lead_capture', 'system');
+            
+            // Gửi email thông báo cho Admin (Sử dụng hàm có sẵn của bạn)
+            soft_ai_notify_admin_by_email($lead_data, "AI Lead Form", $_SERVER['REMOTE_ADDR']);
+
+            $context->set('bot_collecting_info_step', null);
+            return "✅ Cảm ơn bạn! Thông tin tư vấn của bạn đã được gửi đến bộ phận liên quan. Chúng tôi sẽ liên hệ lại sớm nhất qua số " . $context->get('temp_phone') . ".";
     }
     return "";
 }
