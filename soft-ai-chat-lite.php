@@ -75,8 +75,8 @@ add_action('admin_init', 'soft_ai_chat_settings_init');
 add_action('admin_enqueue_scripts', 'soft_ai_chat_admin_enqueue');
 
 function soft_ai_chat_add_admin_menu() {
-    add_menu_page('Soft AI Chat', 'Soft AI Chat', 'manage_options', 'soft-ai-chat', 'soft_ai_chat_options_page', 'dashicons-format-chat', 80);
-    add_submenu_page('soft-ai-chat', 'Live Chat (Support)', '🔴 Live Chat', 'manage_options', 'soft-ai-live-chat', 'soft_ai_live_chat_page');
+    add_menu_page('AI Chat', 'AI Chat', 'manage_options', 'soft-ai-chat', 'soft_ai_chat_options_page', 'dashicons-format-chat', 80);
+    add_submenu_page('soft-ai-chat', 'Live Chat (Support)', 'Live Chat', 'manage_options', 'soft-ai-live-chat', 'soft_ai_live_chat_page');
     add_submenu_page('soft-ai-chat', 'Canned Responses', 'Câu trả lời mẫu', 'manage_options', 'soft-ai-canned-responses', 'soft_ai_canned_responses_page');
     add_submenu_page('soft-ai-chat', 'Settings', 'Settings', 'manage_options', 'soft-ai-chat', 'soft_ai_chat_options_page');
     add_submenu_page('soft-ai-chat', 'Chat History', 'Chat Logs', 'manage_options', 'soft-ai-chat-history', 'soft_ai_chat_history_page');
