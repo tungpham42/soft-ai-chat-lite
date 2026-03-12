@@ -64,6 +64,19 @@ function soft_ai_chat_activate() {
         PRIMARY KEY  (user_id)
     ) $charset_collate;";
     dbDelta($sql_users);
+
+    // Table 4: RAG Knowledge Base (Thêm mới từ bản Pro)
+    $table_rag = $wpdb->prefix . 'soft_ai_rag_docs';
+    $sql_rag = "CREATE TABLE $table_rag (
+        id mediumint(9) NOT NULL AUTO_INCREMENT,
+        title varchar(255) NOT NULL,
+        source_type varchar(50) NOT NULL,
+        source_url text NOT NULL,
+        content longtext NOT NULL,
+        created_at datetime DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id)
+    ) $charset_collate;";
+    dbDelta($sql_rag);
 }
 
 // ---------------------------------------------------------
@@ -77,6 +90,8 @@ add_action('admin_enqueue_scripts', 'soft_ai_chat_admin_enqueue');
 function soft_ai_chat_add_admin_menu() {
     add_menu_page('AI Chat', 'AI Chat', 'manage_options', 'soft-ai-chat', 'soft_ai_chat_options_page', 'dashicons-format-chat', 80);
     add_submenu_page('soft-ai-chat', 'Live Chat (Support)', 'Live Chat', 'manage_options', 'soft-ai-live-chat', 'soft_ai_live_chat_page');
+    // Thêm menu RAG
+    add_submenu_page('soft-ai-chat', 'Dữ liệu RAG', '📚 Dữ liệu RAG', 'manage_options', 'soft-ai-rag', 'soft_ai_rag_page');
     add_submenu_page('soft-ai-chat', 'Canned Responses', 'Câu trả lời mẫu', 'manage_options', 'soft-ai-canned-responses', 'soft_ai_canned_responses_page');
     add_submenu_page('soft-ai-chat', 'Settings', 'Settings', 'manage_options', 'soft-ai-chat', 'soft_ai_chat_options_page');
     add_submenu_page('soft-ai-chat', 'Chat History', 'Chat Logs', 'manage_options', 'soft-ai-chat-history', 'soft_ai_chat_history_page');
@@ -268,6 +283,238 @@ function soft_ai_render_detected_forms() {
     echo '</ul>';
     echo '</div>';
     echo '<p class="description">If active, AI will attempt to sync lead data with these systems.</p>';
+}
+
+// ---------------------------------------------------------
+// 1.1. RAG KNOWLEDGE BASE PAGE (Tích hợp từ Pro)
+// ---------------------------------------------------------
+
+function soft_ai_extract_text_from_file($tmp_name, $ext) {
+    $ext = strtolower($ext);
+    $content = '';
+    
+    if (in_array($ext, ['txt', 'csv'])) {
+        $content = file_get_contents($tmp_name);
+    } elseif (in_array($ext, ['docx', 'xlsx', 'pptx'])) {
+        if (class_exists('ZipArchive')) {
+            $zip = new ZipArchive();
+            if ($zip->open($tmp_name) === TRUE) {
+                for ($i = 0; $i < $zip->numFiles; $i++) {
+                    $name = $zip->getNameIndex($i);
+                    // DOCX
+                    if ($ext == 'docx' && $name == 'word/document.xml') {
+                        $content .= strip_tags(str_replace(['<w:p>', '</w:p>'], [" ", "\n"], $zip->getFromIndex($i)));
+                    }
+                    // XLSX
+                    if ($ext == 'xlsx' && $name == 'xl/sharedStrings.xml') {
+                        $content .= strip_tags(str_replace(['<t>', '</t>'], [" ", " "], $zip->getFromIndex($i)));
+                    }
+                    // PPTX
+                    if ($ext == 'pptx' && strpos($name, 'ppt/slides/slide') !== false) {
+                        $content .= strip_tags(str_replace(['<a:t>', '</a:t>'], [" ", "\n"], $zip->getFromIndex($i))) . "\n";
+                    }
+                }
+                $zip->close();
+            }
+        }
+    } elseif ($ext === 'pdf') {
+        $raw = file_get_contents($tmp_name);
+        if (preg_match_all('/stream[\r\n]*(.*?)[\r\n]*endstream/is', $raw, $matches)) {
+            foreach ($matches[1] as $stream) {
+                $uncompressed = @gzuncompress($stream);
+                if ($uncompressed !== false) {
+                    $stream = $uncompressed;
+                }
+                
+                if (preg_match_all('/\[(.*?)\]\s*TJ/s', $stream, $tj_arrays)) {
+                    foreach ($tj_arrays[1] as $tj) {
+                        if (preg_match_all('/\((.*?)\)/s', $tj, $inner)) {
+                            $content .= implode(" ", $inner[1]) . " ";
+                        }
+                    }
+                }
+                if (preg_match_all('/\((.*?)\)\s*T[jJ]/s', $stream, $tj_matches)) {
+                    $content .= implode(" ", $tj_matches[1]) . " ";
+                }
+                if (preg_match_all('/<([0-9a-fA-F]+)>\s*T[jJ]/s', $stream, $hex_matches)) {
+                    foreach ($hex_matches[1] as $hex) {
+                        $content .= @hex2bin($hex) . " ";
+                    }
+                }
+            }
+        }
+        
+        $content = preg_replace_callback('/\\\([0-7]{1,3})/', function($m) { return chr(octdec($m[1])); }, $content);
+        $content = str_replace(['\(', '\)', '\\\\'], ['(', ')', '\\'], $content);
+        $content = preg_replace('/\s+/', ' ', $content);
+        
+    } else {
+        $raw = file_get_contents($tmp_name);
+        $content = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/', ' ', $raw);
+        $content = strip_tags($content);
+    }
+    
+    return mb_substr(trim($content), 0, 100000); 
+}
+
+function soft_ai_extract_text_from_google($url) {
+    $content = '';
+    if (preg_match('/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([a-zA-Z0-9-_]+)/', $url, $matches)) {
+        $type = $matches[1];
+        $id = $matches[2];
+        $export_url = '';
+
+        if ($type == 'document') {
+            $export_url = "https://docs.google.com/document/d/{$id}/export?format=txt";
+        } elseif ($type == 'spreadsheets') {
+            $export_url = "https://docs.google.com/spreadsheets/d/{$id}/export?format=csv";
+        } elseif ($type == 'presentation') {
+            $export_url = "https://docs.google.com/presentation/d/{$id}/export/txt";
+        }
+
+        if ($export_url) {
+            $response = wp_remote_get($export_url, ['timeout' => 30]);
+            if (!is_wp_error($response)) {
+                $content = wp_remote_retrieve_body($response);
+                if ($type == 'spreadsheets' || $type == 'presentation') {
+                    $content = strip_tags($content);
+                }
+            }
+        }
+    }
+    return mb_substr(trim($content), 0, 100000);
+}
+
+function soft_ai_rag_page() {
+    if (!current_user_can('manage_options')) return;
+    global $wpdb;
+    $table_rag = $wpdb->prefix . 'soft_ai_rag_docs';
+
+    // Xóa file
+    if (isset($_GET['action']) && $_GET['action'] == 'delete_rag' && isset($_GET['id'])) {
+        $del_id = intval($_GET['id']);
+        $wpdb->delete($table_rag, ['id' => $del_id]);
+        echo '<div class="updated"><p>Đã xóa dữ liệu thành công.</p></div>';
+    }
+
+    // Xử lý Upload/URL
+    if (isset($_POST['sac_save_rag']) && check_admin_referer('sac_save_rag_nonce')) {
+        $title = sanitize_text_field($_POST['title']);
+        $gdrive_url = esc_url_raw($_POST['gdrive_url']);
+        $extracted_content = '';
+        $type = '';
+        $source_url = '';
+
+        // Xử lý Google Drive Link
+        if (!empty($gdrive_url)) {
+            $extracted_content = soft_ai_extract_text_from_google($gdrive_url);
+            $type = 'google_drive';
+            $source_url = $gdrive_url;
+            if (!$title) $title = "Google Drive Document";
+        } 
+        // Xử lý File Upload
+        elseif (!empty($_FILES['rag_file']['name'])) {
+            require_once( ABSPATH . 'wp-admin/includes/image.php' );
+            require_once( ABSPATH . 'wp-admin/includes/file.php' );
+            require_once( ABSPATH . 'wp-admin/includes/media.php' );
+            
+            $attachment_id = media_handle_upload( 'rag_file', 0 );
+            
+            if ( !is_wp_error( $attachment_id ) ) {
+                $file_path = get_attached_file( $attachment_id );
+                $file_url = wp_get_attachment_url( $attachment_id );
+                $ext = pathinfo($file_path, PATHINFO_EXTENSION);
+                
+                $extracted_content = soft_ai_extract_text_from_file($file_path, $ext);
+                $type = 'uploaded_file';
+                $source_url = $file_url;
+                if (!$title) $title = basename($file_path);
+            } else {
+                echo '<div class="error"><p>Lỗi upload file: ' . $attachment_id->get_error_message() . '</p></div>';
+            }
+        }
+
+        if (!empty($extracted_content)) {
+            $wpdb->insert($table_rag, [
+                'title' => $title,
+                'source_type' => $type,
+                'source_url' => $source_url,
+                'content' => $extracted_content
+            ]);
+            echo '<div class="updated"><p>Đã thêm dữ liệu vào Knowledge Base thành công! (Dung lượng: '.strlen($extracted_content).' bytes)</p></div>';
+        } elseif(empty($_FILES['rag_file']['name']) || is_wp_error( $attachment_id )) {
+            // Error handling
+        } else {
+            echo '<div class="error"><p>Không thể trích xuất văn bản từ nguồn này hoặc file rỗng.</p></div>';
+        }
+    }
+
+    $docs = $wpdb->get_results("SELECT * FROM $table_rag ORDER BY id DESC");
+    ?>
+    <div class="wrap">
+        <h1>📚 Dữ liệu RAG (Knowledge Base)</h1>
+        <p>Thêm dữ liệu từ các tài liệu bên ngoài (Google Docs/Sheets/Slides hoặc Upload File) để AI có thể đọc và trả lời khách hàng.</p>
+        <p><i>Khuyến nghị: Định dạng .txt, .csv, .docx mang lại kết quả bóc tách chính xác nhất. Google Drive cần được set quyền "Anyone với the link".</i></p>
+
+        <div style="display:flex; gap: 20px;">
+            <div style="width: 400px; background:#fff; padding:20px; border:1px solid #ccc;">
+                <h3>Thêm Dữ Liệu Mới</h3>
+                <form method="post" enctype="multipart/form-data">
+                    <?php wp_nonce_field('sac_save_rag_nonce'); ?>
+                    
+                    <p>
+                        <label><strong>Tên gợi nhớ (Tùy chọn):</strong></label><br>
+                        <input type="text" name="title" value="" style="width:100%;" placeholder="Ví dụ: Chính sách bảo hành">
+                    </p>
+                    <hr>
+                    <p><strong>CÁCH 1: Nhập link Google Drive</strong><br>
+                        <small>(Hỗ trợ Docs, Sheets, Slides)</small><br>
+                        <input type="url" name="gdrive_url" value="" style="width:100%;" placeholder="https://docs.google.com/.../edit">
+                    </p>
+                    <p style="text-align:center;"><b>--- HOẶC ---</b></p>
+                    <p><strong>CÁCH 2: Tải file lên</strong><br>
+                        <small>(Hỗ trợ .docx, .xlsx, .pptx, .txt)</small><br>
+                        <input type="file" name="rag_file" accept=".docx,.xlsx,.pptx,.txt">
+                    </p>
+                    
+                    <p style="margin-top:20px;">
+                        <button type="submit" name="sac_save_rag" class="button button-primary">Trích xuất & Lưu</button>
+                    </p>
+                </form>
+            </div>
+
+            <div style="flex:1;">
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th width="50">ID</th>
+                            <th>Tiêu đề / Tên File</th>
+                            <th width="150">Loại Nguồn</th>
+                            <th width="120">Độ dài (Ký tự)</th>
+                            <th width="100">Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if($docs): foreach($docs as $d): ?>
+                        <tr>
+                            <td><?php echo $d->id; ?></td>
+                            <td>
+                                <strong><?php echo esc_html($d->title); ?></strong><br>
+                                <small style="color:#666; word-break: break-all;"><a href="<?php echo esc_url($d->source_url); ?>" target="_blank"><?php echo esc_html($d->source_url); ?></a></small>
+                            </td>
+                            <td><?php echo esc_html($d->source_type); ?></td>
+                            <td><?php echo number_format(mb_strlen($d->content)); ?></td>
+                            <td>
+                                <a href="?page=soft-ai-rag&action=delete_rag&id=<?php echo $d->id; ?>" class="button button-small button-link-delete" onclick="return confirm('Bạn có chắc muốn xóa tài liệu này?')">Xóa</a>
+                            </td>
+                        </tr>
+                        <?php endforeach; else: echo '<tr><td colspan="5">Chưa có dữ liệu nào.</td></tr>'; endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <?php
 }
 
 // ---------------------------------------------------------
@@ -1108,10 +1355,50 @@ function soft_ai_clean_content($content) {
 }
 
 function soft_ai_chat_get_context($question) {
+    global $wpdb;
+
+    // 1. Lấy Context từ RAG (Knowledge Base)
+    $rag_context = "";
+    $table_rag = $wpdb->prefix . 'soft_ai_rag_docs';
+    
+    // Tách từ khóa để tìm kiếm (Bỏ qua từ quá ngắn)
+    $search_terms = array_filter(explode(' ', mb_strtolower(trim($question))), function($w) {
+        return mb_strlen($w) > 2;
+    });
+
+    if (!empty($search_terms)) {
+        $likes = [];
+        $params = [];
+        foreach ($search_terms as $term) {
+            $likes[] = "content LIKE %s";
+            $params[] = '%' . $wpdb->esc_like($term) . '%';
+        }
+        $where = implode(' OR ', $likes);
+        // Tìm 3 tài liệu khớp nhất
+        $rag_docs = $wpdb->get_results($wpdb->prepare("SELECT title, content FROM $table_rag WHERE $where LIMIT 3", $params));
+        
+        foreach ($rag_docs as $doc) {
+            // Lấy 1 snippet nhỏ chứa từ khóa để giảm token
+            $content_lower = mb_strtolower($doc->content);
+            $pos = 0;
+            foreach ($search_terms as $term) {
+                $p = mb_strpos($content_lower, $term);
+                if ($p !== false) {
+                    $pos = $p;
+                    break;
+                }
+            }
+            $start = max(0, $pos - 200); // Lùi lại 200 ký tự để lấy ngữ cảnh
+            $snippet = mb_substr($doc->content, $start, 800); // Trích xuất đoạn 800 ký tự
+            $rag_context .= "--- Source (RAG Knowledge Base): {$doc->title} ---\nContent: ...{$snippet}...\n\n";
+        }
+    }
+
+    // 2. Lấy Context từ bài viết/sản phẩm trên Website (Hành vi cũ)
     $args = ['post_type' => ['post', 'page', 'product'], 'post_status' => 'publish', 'posts_per_page' => 4, 's' => $question, 'orderby' => 'relevance'];
     $posts = get_posts($args);
 
-    $context = "";
+    $wp_context = "";
     if ($posts) {
         foreach ($posts as $post) {
             $info = "";
@@ -1120,10 +1407,12 @@ function soft_ai_chat_get_context($question) {
                 if ($p) $info = " | Price: " . $p->get_price_html() . " | Status: " . $p->get_stock_status();
             }
             $clean_body = soft_ai_clean_content($post->post_content);
-            $context .= "--- Source: {$post->post_title} ---\nLink: " . get_permalink($post->ID) . $info . "\nContent: $clean_body\n\n";
+            $wp_context .= "--- Source (Website): {$post->post_title} ---\nLink: " . get_permalink($post->ID) . $info . "\nContent: $clean_body\n\n";
         }
     }
-    return $context ?: "No specific website content found for this query.";
+    
+    $final_context = $rag_context . $wp_context;
+    return $final_context ?: "No specific website content or Knowledge Base found for this query.";
 }
 
 function soft_ai_log_chat($question, $answer, $source = 'widget', $provider_override = '', $model_override = '') {
@@ -1278,10 +1567,10 @@ function soft_ai_generate_answer($question, $platform = 'widget', $user_id = '')
     
     $system_prompt = "You are a helpful AI Consultant for this website.\n" .
                      ($user_instruction ? "Persona: $user_instruction\n" : "") .
-                     "Website Content:\n" . $site_context . "\n" .
+                     "Website & RAG Knowledge Base Content:\n" . $site_context . "\n" .
                      "Form Context: " . $form_context . "\n\n" .
                      "INSTRUCTIONS:\n" . 
-                     "1. Answer based on Website Content.\n" .
+                     "1. Answer based on Website & RAG Content.\n" .
                      "2. If the user wants to contact, leave a message, or register, follow the 'collecting_info' flow.\n" .
                      "3. You MUST collect: Full Name, Phone, and their Question/Inquiry.\n" .
                      "4. Once collected, inform them that 'Thông tin đã được ghi nhận'.\n" .
