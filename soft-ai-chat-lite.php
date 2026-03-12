@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: Soft AI Chat (All-in-One) - Enhanced Payment & Social & Live Chat & Coupons & Canned Responses
+ * Plugin Name: Soft AI Chat Lite
  * Plugin URI:  https://soft.io.vn/soft-ai-chat
  * Description: AI Chat Widget & Sales Bot. Supports RAG + WooCommerce + Coupons + VietQR/PayPal + Facebook/Zalo + Live Chat + Canned Responses + Auto Suggestions + Customer Profiles.
  * Version:     3.6.0
